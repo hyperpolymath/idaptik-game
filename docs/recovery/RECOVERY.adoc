@@ -1,0 +1,304 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+
+= Idaptik Recovery Plan: Make It Work Again
+:toc:
+:sectnums:
+
+== Why this document exists
+
+The 2026-04-30 stabilisation synthesis identified four Tier-0 defects that
+together explain why the game is not running. Recovery comes BEFORE the
+AffineScript port. The port lands on a working baseline; it does not fix
+the broken baseline.
+
+This document is concrete, executable, and ordered. Each section is one PR
+to the current `hyperpolymath/idaptik` monorepo. Time budget is hours, not
+weeks. After this lands the game runs again on the existing ReScript stack;
+the modular AffineScript port can then proceed safely.
+
+== Pre-flight diagnostic
+
+Run before opening any of the recovery PRs:
+
+[source,bash]
+----
+cd idaptik
+
+# 1. Confirm the deleted-shared-source story.
+git log --all --diff-filter=D -- 'shared/src/*.res' | head -20
+ls shared/src/*.res 2>/dev/null | wc -l   # expect: 0
+ls shared/lib/*.res.js 2>/dev/null | wc -l # expect: 27 (audit number)
+
+# 2. Confirm the orphaned VM build.
+test -f vm/rescript.json && echo "exists" || echo "MISSING"
+ls vm/lib/ocaml/*.res | wc -l             # expect: 31
+ls vm/src/core/*.res.mjs 2>/dev/null | wc -l  # expect: stale .mjs callers import
+
+# 3. Confirm orphan .mjs imports in src/.
+grep -rE 'import .* from .*\\.mjs' src/ | grep -v node_modules | head -10
+
+# 4. Confirm the Tauri/Gossamer drift in UMS.
+grep -ri 'tauri' idaptik-ums/ docs/ | grep -v node_modules | head -10
+----
+
+If any of these come back surprising, stop and revisit assumptions before
+running the recovery PRs.
+
+== PR 1 — Restore shared/ from history
+
+*Goal*: Re-establish the 27 `shared/src/*.res` source files so the rest of
+the build can compile against a real source tree, not against orphan
+`.res.js` artifacts.
+
+[source,bash]
+----
+# Find the deletion commit.
+DELETION=$(git log --all --diff-filter=D --format=%H -- 'shared/src/*.res' | head -1)
+echo "Deletion commit: $DELETION"
+
+# Restore the parent's tree at that path.
+git checkout "${DELETION}~1" -- shared/src/
+
+# Add the missing build config.
+cat > shared/rescript.json <<'EOF'
+{
+  "name": "idaptik-shared",
+  "sources": [
+    { "dir": "src", "subdirs": true }
+  ],
+  "package-specs": [
+    { "module": "esmodule", "in-source": true }
+  ],
+  "suffix": ".res.js",
+  "bs-dependencies": ["@rescript/core"],
+  "bsc-flags": ["-open RescriptCore"]
+}
+EOF
+
+# Re-run the v13 migration on the restored sources. Apply the same rules
+# the rest of src/ already obeys (per CLAUDE.md):
+#   Js.Dict.* -> Dict.*
+#   Js.Json.classify -> JSON.Classify.classify (returns variant, not option)
+#   Belt.* -> @rescript/core stdlib equivalents
+sed -i 's/Js\\.Dict\\./Dict./g'                 shared/src/*.res
+sed -i 's/Js\\.Json\\.classify/JSON.Classify.classify/g' shared/src/*.res
+# DLCLoader.res specifically needs the JSON.Classify variant pattern, not
+# the legacy option-returning classify. Hand-review after the sed pass.
+
+# Build to surface real errors.
+deno task res:build 2>&1 | tee shared-rebuild.log
+----
+
+*Done when*: `deno task res:build` succeeds with `shared/` in the source
+tree. The audit's "ZERO Js./Belt." claim is honoured for shared/.
+
+*Out of scope*: The redesign of shared/ as a thin façade over contracts.
+That happens during the AffineScript port, not now.
+
+== PR 2 — Wire up vm/rescript.json
+
+*Goal*: Reconnect the 31 live VM source files (`vm/lib/ocaml/*.res`,
+last edited Apr 29) to the build. Currently callers import 5-week-stale
+`.res.mjs` artifacts because nothing has been compiling.
+
+[source,bash]
+----
+cat > vm/rescript.json <<'EOF'
+{
+  "name": "idaptik-vm",
+  "sources": [
+    { "dir": "lib/ocaml", "subdirs": false },
+    { "dir": "src/core",  "subdirs": true },
+    { "dir": "tests",     "type": "dev" }
+  ],
+  "package-specs": [
+    { "module": "esmodule", "in-source": true }
+  ],
+  "suffix": ".res.mjs",
+  "bs-dependencies": ["@rescript/core"],
+  "bsc-flags": ["-open RescriptCore"]
+}
+EOF
+
+deno task res:build 2>&1 | tee vm-rebuild.log
+----
+
+*Done when*: VM compiles with no errors. Tests in `vm/tests/` run.
+
+*Expected fallout*: This will surface real compile errors that the audit
+could not see — including (per audit) probable reversibility-invariant
+violations in `Pop.res:13-19` and `Loop.res:34-54` whose guards are
+docstring-only today. Fix them in this PR while the build is hot.
+
+== PR 3 — Fix orphan .mjs imports in src/
+
+*Goal*: The audit identified `.mjs` imports of deleted helpers. After PR 1
+and PR 2, most of these resolve automatically. The remainder are imports
+that used to come from `dlc/idaptiky/` or removed `TextHelpers` and need
+either re-pointing or removing.
+
+[source,bash]
+----
+# List remaining unresolved imports.
+deno task res:build 2>&1 | grep -E "Cannot find module|Module .* not found" \
+  | sort -u > unresolved-imports.txt
+
+# For each unresolved import, decide:
+#   (a) repoint to current location
+#   (b) remove the call site if the feature is dead
+#   (c) restore the helper from git history (same pattern as PR 1)
+----
+
+*Done when*: `deno task build` produces a `dist/` and `deno task dev`
+serves the game on port 1984.
+
+== PR 4 — Restore UMS ↔ game integration
+
+*Goal*: The UMS already moved off Tauri to Gossamer (per Justfile recipe
+`ums-gossamer`); the docs still claim Tauri. More importantly, the
+procedural-generation pipeline from UMS into game content is broken.
+
+Subtasks:
+
+. *Doc rewrite*. Find and replace Tauri references in:
+* `idaptik-ums/ABI-FFI-README.md`
+* `idaptik-ums/TOPOLOGY.md`
+* `idaptik-ums/index.html`
+* `idaptik-ums/docs/design/GAME-INTEGRATION.md`
+* `idaptik-ums/ffi/zig/build.zig:133`
+* Top-level `CLAUDE.md` Tauri 2 reference.
++
+Replace with Gossamer per the existing `ums-gossamer` Justfile recipe.
+
+. *ProvenBridge fate decision*. `ProvenBridge.idr` has two typed holes and
+the `proven` dependency is commented out. Pick:
++
+* Fill the holes and re-enable `depends = proven`. Best for verification posture.
+* Move to `experimental/` and gate. Best for "make it work first."
++
+Recommendation: gate to `experimental/` for now, file an issue to revisit
+during the AffineScript port (effect rows give a third option there).
+
+. *Procedural-generation export contract*. Currently UMS generates content
+but the wire from UMS-output → game-content-loader is undefined. Define it:
++
+* UMS writes generated artifacts to `idaptik-ums/dist/generated/` as JSON
+  manifests with the same shape as `src/manifest.json` produced by
+  AssetPack.
+* The game's existing AssetPack manifest loader reads UMS output exactly
+  as if AssetPack had produced it.
+* This means the game requires *no code changes* to consume
+  procedurally-generated content.
++
+This is the smallest possible bridge that unlocks the procedural-gen
+pipeline. Schema goes into `idaptik-contracts` (Plan §1).
+
+. *Smoke test*. Add a Justfile target:
++
+[source,makefile]
+----
+ums-game-smoke:
+    cd idaptik-ums && just generate-test-fixture
+    cp idaptik-ums/dist/generated/test.manifest.json src/dlc-manifests/
+    deno task dev &
+    sleep 5
+    curl -f http://localhost:1984/dlc/test/check
+    kill %1
+----
++
+Pass means UMS-generated content reaches the running game.
+
+*Done when*: `just ums-game-smoke` passes locally. The UMS docs no longer
+mention Tauri. Procedural-gen artifacts produced by UMS are loadable by
+the game with no game-side code changes.
+
+== PR 5 — Reclassify VM as DLC
+
+*Goal*: Reflect the design decision that the VM is a DLC of the game, not
+a foundational peer component.
+
+. Move `vm/` to `dlc/vm/` in the existing monorepo.
+. Update `rescript.json` paths.
+. Update CLAUDE.md (drop "23 instructions, all reversible, JSON.Classify
+state" from VM-as-foundational and re-state under "DLC packs available").
+. Update CODEOWNERS and dependabot.yml accordingly.
+. Add `dlc/vm/dlc-manifest.json` declaring the VM as a DLC pack the game
+loads via the existing DLC loader.
+
+This PR is independent of PRs 1-4 but easier to land after them (PR 2
+fixes the VM build first; this PR moves the now-working VM into its DLC
+home).
+
+== PR 6 — Tier-0 doc reconciliation
+
+*Goal*: Stop CLAUDE.md from lying. After PRs 1-5, the project is in a
+known-good state and CLAUDE.md can describe it accurately.
+
+. Replace "542 .res files" with the real number from `find . -name '*.res'
+  -not -path './node_modules/*' | wc -l`. Or scope to `src/` only and say
+  so.
+. Scope "ZERO Js./Belt." to `src/` + `vm/` + `shared/`. Acknowledge that
+  `dlc/idaptiky/` and `dlc/idaptik-reversibley/` are TypeScript packs that
+  have always been outside that rule.
+. Drop the "17 ADRs" claim. The actual ADR count after merging
+  ADR-001 (polyrepo) and ADR-002 (VM-as-DLC) and any current developer
+  portal ADRs is the truth.
+. Drop or update the Tauri reference (PR 4 already handled UMS docs;
+  CLAUDE.md is the last place).
+
+== PR 7 — Tier-0 CI hygiene
+
+*Goal*: Stop the doc/CI drift from re-emerging.
+
+. Rewrite `.github/CODEOWNERS` against the now-known top-level layout
+  (post-PR 5 with `vm/` → `dlc/vm/`).
+. Rewrite `.github/dependabot.yml` to match. Add `cargo`, `mix`, `docker`
+  ecosystems (audit Tier-2 #9).
+. Pin `.github/workflows/serviceworker-check.yml` `actions/checkout@v6` to
+  a SHA.
+. Drop `continue-on-error: true` from the trufflehog secret scan.
+. Fix malformed JSON in `boj-build.yml`.
+. Add `concurrency: { group, cancel-in-progress: true }` to PR-triggered
+  workflows.
+
+These are individually small but together form the audit's Tier-2 set;
+land them as one PR since they're all .github/.
+
+== PR 8 — Sync server :dets.sync debounce
+
+*Goal*: Replace per-write `:dets.sync` with a 5s tick + sync-on-terminate.
+
+This is a small Elixir patch; no port involved. Ship it standalone before
+the sync-server moves to its own repo.
+
+== After recovery: AffineScript port begins
+
+Recovery PRs 1-8 leave the project in a known-good, builds-and-runs,
+single-monorepo state. This is the baseline the AffineScript port lands on.
+
+Sequencing of the port itself is in `docs/PORT-PLAN.adoc` (Plan §0–§6).
+The port is not blocked on recovery completing all eight PRs — PR 1, 2,
+and 4 are mandatory; the rest can be done in parallel with early port
+waves.
+
+== Estimated effort
+
+[cols="1,1,2,1"]
+|===
+| PR | Hours | Confidence | Blocks port?
+
+| 1  Restore shared/                    | 2-4   | High   | YES
+| 2  vm/rescript.json + fix surfaces   | 4-8   | Medium | YES
+| 3  Fix orphan .mjs imports           | 2-4   | High   | YES
+| 4  UMS↔game integration              | 6-12  | Medium | NO  (independent)
+| 5  Reclassify VM as DLC              | 2-3   | High   | NO
+| 6  Doc reconciliation                | 1-2   | High   | NO
+| 7  CI hygiene                        | 2-3   | High   | NO
+| 8  :dets.sync debounce               | 1-2   | High   | NO
+|===
+
+*Critical path to working game: PR 1 + PR 2 + PR 3, ~10 hours.*
+
+After that, the AffineScript port can begin while remaining recovery PRs
+proceed in parallel.

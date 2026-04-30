@@ -1,0 +1,57 @@
+; SPDX-License-Identifier: PMPL-1.0-or-later
+; STATE.a2ml — idaptik-game
+
+[metadata]
+project = "idaptik-game"
+version = "0.1.0-alpha"
+type = "game"
+last-updated = "2026-04-30"
+branch = "main"
+build-status = "scaffold-only"
+test-status = "pending"
+
+[project-context]
+description = "IDApixiTIK asymmetric co-op stealth puzzle-platformer (AffineScript → typed-wasm)"
+primary-language = "affinescript"
+target = "wasmgc"
+runtime = "browser via nginx, native via Gossamer"
+ports = [8080]
+depends-on = ["idaptik-contracts", "idaptik-shared", "idaptik-dlc-vm"]
+
+[current-position]
+phase = "scaffold"
+milestone = "Repo declared. Recovery PRs 1-3 must land first to make the game work on the existing ReScript stack; AffineScript port begins after."
+gating = "Recovery PRs 1, 2, 3 in hyperpolymath/idaptik."
+
+[component-status]
+scaffold = { percent = 60, notes = "README, stapeln.toml, Containerfile, Justfile, .machine_readable/6a2/STATE.a2ml present. RSR template floor + contractiles + remaining 6a2 files pending scaffold-component.py run." }
+recovery-baseline = { percent = 0, notes = "Recovery PRs to make the existing ReScript game work — gating dependency for this repo's port to begin." }
+engine = { percent = 0, notes = "Port from src/Engine/ (~30 .res files)." }
+screens = { percent = 0, notes = "Port from src/app/screens/." }
+devices = { percent = 0, notes = "Port from src/app/devices/." }
+combat = { percent = 0, notes = "Port from src/app/combat/." }
+companions = { percent = 0, notes = "Port from src/app/companions/." }
+enemies = { percent = 0, notes = "Port from src/app/enemies/. Audit-flagged: GuardNPC.res 1820 LOC megafile — must split into per-archetype modules." }
+multiplayer = { percent = 0, notes = "Port from src/app/multiplayer/. Consumes generated/elixir bindings via JS FFI to sync server." }
+narrative = { percent = 0, notes = "Port from src/app/narrative/. Candidate for PseudoScript face." }
+pickups = { percent = 0, notes = "Port from src/app/pickups/." }
+player = { percent = 0, notes = "Port from src/app/player/." }
+popups = { percent = 0, notes = "Port from src/app/popups/. Audit-flagged: NetworkDesktop.res 1767 LOC megafile — must split." }
+proven = { percent = 0, notes = "Port from src/app/proven/. ProvenBridge fate decided per Recovery PR 4." }
+tools = { percent = 0, notes = "Port from src/app/tools/." }
+ui = { percent = 0, notes = "Port from src/app/ui/. Audit-flagged: LaptopGUI.res 2081 LOC megafile — must split." }
+utils = { percent = 0, notes = "Port from src/app/utils/." }
+bindings = { percent = 30, notes = "Pixi/Sound/UI/Motion FFI shims — keep as JS bindings; type-wrap via AffineScript externals." }
+dlc-loader = { percent = 0, notes = "Loads dlc-vm and DLCs produced by UMS via AssetPack-shape manifests." }
+
+[route-to-mvp]
+remaining = [
+  { item = "Land Recovery PRs 1-3 against existing monorepo (gating)", priority = "critical" },
+  { item = "Run scaffold-component.py to fill in RSR + contractiles + remaining 6a2", priority = "high" },
+  { item = "Port Engine module-by-module", priority = "high" },
+  { item = "Port screens module-by-module", priority = "high" },
+  { item = "Port app/* directory-by-directory", priority = "high" },
+  { item = "Wire generated/affinescript/Contracts/* consumption", priority = "high" },
+  { item = "First green container build", priority = "medium" },
+  { item = "First green smoke test against running sync server", priority = "medium" }
+]

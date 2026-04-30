@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+
+= idaptik-game
+:toc:
+
+The IDApixiTIK game itself: an asymmetric co-op stealth puzzle-platformer
+written in AffineScript, compiling to typed-wasm WasmGC, rendered with
+PixiJS through a thin FFI binding layer.
+
+== Status
+
+The current `hyperpolymath/idaptik` repo's `src/` directory (508 .res files)
+ports here. The port is gated by Recovery PRs 1-3 (see
+`idaptik-developers/docs/RECOVERY.adoc`): the game must build and run on
+the existing ReScript stack before the AffineScript port begins.
+
+== Layout
+
+----
+idaptik-game/
+├── src/
+│   ├── Main.affine                 # entry point
+│   ├── Engine/                     # core game engine
+│   ├── app/
+│   │   ├── combat/                 # one .affine module per directory —
+│   │   ├── companions/             # the audit's megafile-split rule is
+│   │   ├── devices/                # structurally enforced (no LaptopGUI
+│   │   ├── enemies/                # 2081-LOC equivalent possible).
+│   │   ├── multiplayer/
+│   │   ├── narrative/
+│   │   ├── pickups/
+│   │   ├── player/
+│   │   ├── popups/
+│   │   ├── proven/
+│   │   ├── screens/
+│   │   ├── tools/
+│   │   ├── ui/
+│   │   └── utils/
+│   └── bindings/                   # JS FFI shims (Pixi, Sound, UI, Motion)
+├── dlc-loader/                     # loads dlc-vm and other DLCs
+│   └── DlcLoader.affine
+├── public/                         # static assets
+├── raw-assets/                     # AssetPack source
+├── tests/
+└── (RSR / stapeln / contractiles / 6a2)
+----
+
+== Dependencies
+
+* `idaptik-contracts` — Role, SecurityLevel, DeviceKind, Zone, Instruction
+* `idaptik-shared` — façade utilities
+* `idaptik-dlc-vm` — VM as DLC (loaded at puzzle screens)
+* PixiJS 8.8.1 (via FFI in `src/bindings/`)
+
+== Faces
+
+The port uses AffineScript's faces system deliberately:
+
+* *Engine, screens, devices*: canonical AffineScript face. Effect-explicit;
+  the typed `VmState` / `Render` / `IO` / `Network` boundaries are
+  reviewable.
+* *UI rendering glue*: JaffaScript face. JS-shaped syntax over the same
+  affine/QTT semantic core. Familiar to anyone arriving from the Pixi
+  ecosystem; same guarantees apply.
+* *Narrative scripts*: PseudoScript face. Designer-readable.
+
+== UMS↔game integration
+
+The game's existing AssetPack manifest loader is the bridge. UMS produces
+generated content as `dlc-manifest.json` artifacts in the same shape;
+the game loads them with no game-side code changes. See Recovery PR 4.
+
+== Status (per port)
+
+| Subsystem | LOC (ReScript) | LOC (AffineScript) | Status |
+|-----------|---------------:|-------------------:|--------|
+| Engine | TODO | TODO | not started |
+| Screens | TODO | TODO | not started |
+| Devices | TODO | TODO | not started |
+| Combat | TODO | TODO | not started |
+| Multiplayer | TODO | TODO | not started |
+| (etc.)   |   |   |   |
+
+The total is ~508 .res files; the port is multi-week work that proceeds
+module-by-module.
+
+== License
+
+PMPL-1.0-or-later.

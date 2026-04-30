@@ -1,0 +1,47 @@
+; SPDX-License-Identifier: PMPL-1.0-or-later
+; Mustfile.a2ml — physical state invariants for idaptik-game.
+
+(contractile :kind must :version 1)
+
+(must license-present :doc "LICENSE present." :cmd "test -f LICENSE")
+(must readme-present :doc "README.adoc present." :cmd "test -f README.adoc")
+(must security-md :doc "SECURITY.md present." :cmd "test -f SECURITY.md")
+(must changelog-present :doc "CHANGELOG.md present." :cmd "test -f CHANGELOG.md")
+(must stapeln-config :doc "stapeln.toml present." :cmd "test -f stapeln.toml")
+(must containerfile-present :doc "Containerfile fallback present." :cmd "test -f Containerfile")
+
+(must spdx-headers
+  :doc "Every .affine source file carries SPDX-License-Identifier."
+  :cmd "find src/ -name '*.affine' | xargs -r grep -L 'SPDX-License-Identifier' | wc -l | grep -q '^0$'")
+
+(must affinescript-compiles
+  :doc "AffineScript checker passes on src/."
+  :cmd "affinescript check src/ 2>&1 | tee /tmp/check.log; ! grep -q 'error' /tmp/check.log")
+
+(must no-rescript-residue
+  :doc "Port complete — no leftover .res files."
+  :cmd "find src/ -name '*.res' | wc -l | grep -q '^0$'")
+
+(must no-belt-residue
+  :doc "No accidentally-imported Belt references in JS bindings."
+  :cmd "find src/bindings -name '*.js' 2>/dev/null | xargs -r grep -l 'Belt\\.' | wc -l | grep -q '^0$'")
+
+(must wasmgc-target-builds
+  :doc "Each top-level module compiles to a .wasm artifact."
+  :cmd "test -d dist/wasm && test $(find dist/wasm -name '*.wasm' | wc -l) -gt 0")
+
+(must contracts-pinned
+  :doc "Submodule pointer for components/contracts present and pinned."
+  :cmd "git submodule status | grep -q 'components/contracts'")
+
+(must dlc-vm-pinned
+  :doc "Submodule pointer for components/dlc-vm present and pinned."
+  :cmd "git submodule status | grep -q 'components/dlc-vm'")
+
+(must no-banned-files
+  :doc "No Dockerfile / Makefile / package-lock / node_modules / .env."
+  :cmd "test ! -f Dockerfile && test ! -f Makefile && test ! -f package-lock.json && test ! -d node_modules && test ! -f .env")
+
+(must megafile-budget
+  :doc "No source file exceeds 800 LOC. Audit-driven rule: LaptopGUI/GuardNPC/NetworkDesktop megafiles cannot recur."
+  :cmd "find src/ -name '*.affine' | xargs -r wc -l | awk 'NR<NF && $1>800 {print; exit 1} END {exit 0}'")

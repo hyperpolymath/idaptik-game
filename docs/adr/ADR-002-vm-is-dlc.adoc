@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+
+= ADR-002: The Reversible VM is a DLC of the Game
+:toc:
+:sectnums:
+
+== Status
+
+Proposed (2026-04-30). Supersedes the implicit "VM as peer component"
+positioning in ADR-001.
+
+== Context
+
+ADR-001 listed the reversible VM (`idaptik-vm`) as a peer component of the
+game, the shared façade, the UMS, etc. Reviewing the actual usage in the
+existing monorepo:
+
+* The VM is consumed only by the game and by DLC packs (`dlc/idaptiky/`,
+  `dlc/idaptik-reversibley/`) that themselves re-implement VM bits.
+* The sync server, escape-hatch TUI, and UMS shell do not use the VM.
+* The reversibility invariant is a *gameplay mechanic* (puzzle reversal,
+  step-by-step debugging in-game) rather than a foundational service.
+* The current monorepo layout reflects this: `dlc/` packs already share
+  authorship with the VM and re-implement near-identical instruction
+  semantics.
+
+Treating the VM as a peer-of-game component over-elevates it. It should
+be a DLC pack the game loads, on the same level as `dlc/idaptiky/`.
+
+== Decision
+
+. The VM's *types* (Instruction enum, state-key prefixes, reversibility
+  taxonomy) live in `idaptik-contracts`. These are cross-component
+  agreements — the sync server uses the Instruction enum to validate
+  client-submitted programs, for example.
+
+. The VM's *implementation* (the 23 instruction modules + execution loop
+  + history tracker + subroutine registry) lives in `idaptik-dlc-vm`.
+  This repo is structurally a DLC pack: it produces a `dlc-manifest.json`
+  the game's existing DLC loader consumes.
+
+. The other DLC packs (`idaptik-dlc-iky`, `idaptik-dlc-reversibley`)
+  collapse from "DLCs that re-implement VM bits" into "DLCs that import
+  `idaptik-dlc-vm` and add data."
+
+. The wrapper repo's `components/dlc-vm/` submodule pointer reflects
+  this; there is no `components/vm/` peer.
+
+== Consequences
+
+=== Positive
+
+* *Smaller blast radius for VM changes.* A change to the instruction set
+  is a contracts change (codegen — touches everyone) followed by a
+  DLC-vm implementation change (touches only the VM repo). It does not
+  cascade through sibling components.
+
+* *DLC pattern is uniform.* Every gameplay mechanic that loads dynamically
+  is a DLC. The game has one extension story, not two ("VM" plus "DLC").
+
+* *Cleaner port surface.* Wave 1 ports a DLC, not a foundational service.
+  If the AffineScript compiler stalls on dependent types needed for the
+  VM port, the rest of the game is not blocked — it loads existing
+  DLC-vm builds while the AffineScript version matures.
+
+=== Negative
+
+* *Slight redundancy with `dlc-iky` / `dlc-reversibley`.* These two DLC
+  packs were created when the VM was an in-tree subdirectory. After this
+  ADR, they exist mostly to add data on top of `dlc-vm`. We accept this:
+  collapsing them into `dlc-vm` would lose the per-pack identity that
+  the game's level/puzzle metadata uses.
+
+* *Game now mandates a DLC.* The game without `dlc-vm` is not a complete
+  game. We accept this: it has been true in practice for a long time.
+
+=== Neutral
+
+* *Existing CLAUDE.md narrative needs updating.* The "23 instructions,
+  all reversible" claim moves from "VM Architecture" to "Built-in DLC
+  packs." Recovery PR 6 handles this.
+
+== Implementation
+
+. `components/vm/` submodule entry deleted from wrapper `.gitmodules`.
+. `components/dlc-vm/` submodule entry pointing at
+  `hyperpolymath/idaptik-dlc-vm` added.
+. `idaptik-contracts/contracts.a2ml` already declares the Instruction
+  enum and state-key prefixes (Plan §1, complete).
+. The 23 instruction modules port to AffineScript inside `idaptik-dlc-vm`.
+. `idaptik-dlc-vm/dlc-manifest.json` follows the game's existing DLC
+  loader schema.
+. The current monorepo's `vm/` directory moves to `dlc/vm/` in
+  Recovery PR 5.
+
+== Procedural-generation implication
+
+UMS's procedural-generation pipeline becomes a DLC factory: UMS produces
+new DLC packs as `dlc-manifest.json` artifacts plus accompanying assets
+and (where applicable) AffineScript modules. The game loads them as it
+would any other DLC. This is the ADR-002 corollary that unlocks Plan §4
+(UMS↔game integration).
+
+== References
+
+* ADR-001 polyrepo topology.
+* `idaptik-contracts/contracts.a2ml` § Instruction.
+* `docs/RECOVERY.adoc` PR 5 — physical relocation in the current monorepo.
+* `docs/RECOVERY.adoc` PR 4 — UMS↔game integration that depends on this.

@@ -1,0 +1,31 @@
+; SPDX-License-Identifier: PMPL-1.0-or-later
+; ECOSYSTEM.a2ml — idaptik-game
+
+[metadata]
+last-updated = "2026-04-30"
+
+[depends-on]
+idaptik-contracts = "Role, SecurityLevel, DeviceKind, Zone, Instruction enums"
+idaptik-shared = "façade utilities over contracts"
+idaptik-dlc-vm = "reversible VM as DLC, loaded at puzzle screens"
+affinescript = "compiler + stdlib"
+typed-wasm = "WasmGC layout contracts at FFI boundaries"
+pixijs = "rendering engine (FFI binding)"
+
+[used-by]
+idaptik-wrapper = "the game is what users run; wrapper Justfile delegates `just run` here"
+idaptik-ums = "UMS produces DLC manifests the game's DLC loader consumes"
+
+[wrapper-position]
+parent = "hyperpolymath/idaptik (wrapper repo)"
+submodule-path = "components/game"
+
+[contracts]
+imports = ["Role", "SecurityLevel", "DeviceKind", "Zone", "Instruction", "InstructionTier", "StateKey", "ChannelTopic"]
+publishes = ["DlcManifest schema (consumed by UMS-generated DLCs)"]
+
+[runtime-graph]
+sync-server = "WebSocket; player join, role select, position broadcast, alert dispatch"
+verisimdb = "HTTP; per-session state persistence (via sync-server)"
+burble = "WebRTC; in-game voice"
+escape-hatch = "TUI; not consumed at runtime — developer tool only"

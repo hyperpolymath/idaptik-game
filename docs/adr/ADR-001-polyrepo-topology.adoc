@@ -1,0 +1,239 @@
+// SPDX-License-Identifier: PMPL-1.0-or-later
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell
+
+= ADR-001: Polyrepo + Monorepo-Wrapper Topology for Idaptik
+:toc:
+:sectnums:
+
+== Status
+
+Proposed (2026-04-30).
+
+== Context
+
+The current `hyperpolymath/idaptik` repository is a 50 MB monorepo containing
+six structurally distinct components built in five primary languages (ReScript,
+Elixir, Idris2, Zig, Rust) plus DLC packs in TypeScript. The 2026-04-30
+stabilisation synthesis identified three cross-cutting failure modes that all
+trace to the monorepo shape:
+
+. *Doc-vs-reality drift dominates.* CLAUDE.md totals, UMS Tauri references,
+  CODEOWNERS paths, STATE.a2ml dates, CHANGELOG, ADR count — all rotten because
+  no machine checks them. A monorepo concentrates documentation in one place
+  and increases the surface that has to be hand-reconciled across components.
+
+. *Boundary contracts rot when hand-maintained.* The role enum desync
+  (Elixir↔Elixir↔ReScript) and the `main-game/` path drift in CODEOWNERS are
+  both monorepo-internal hand-coordination failures. Generated contracts
+  (Idris↔Zig enum encodings) hold; the failures cluster on hand-typed pairs.
+
+. *Build-config orphaning.* Two components (`vm/`, `shared/`) have live edits
+  but no `rescript.json` reaching them; compiled artifacts callers import are
+  weeks stale. A polyrepo with one build config per repo cannot orphan build
+  config in this way without the orphaned repo being immediately and
+  obviously orphaned.
+
+A separate forcing function: idaptik is also being ported. Rust → Rust+SPARK
+(escape-hatch only) and ReScript/TypeScript → AffineScript (game, VM, shared,
+UMS shell, DLC). The port is the first opportunity in years to choose a
+topology deliberately rather than continue an inherited one.
+
+== Decision
+
+Adopt a *polyrepo + monorepo-wrapper* topology, mirroring the existing
+`hyperpolymath/repos-monorepo` eclipse-drive convention.
+
+=== New repository layout
+
+[cols="1,1,2"]
+|===
+| Repo | Language | Role
+
+| `idaptik`
+| (wrapper)
+| Eclipse-drive monorepo wrapper. Tracks submodule pointers for the components
+  below. Holds top-level docs that are genuinely cross-component (TOPOLOGY,
+  ROADMAP) and nothing else.
+
+| `idaptik-contracts`
+| AffineScript (source of truth) + codegen
+| Single source of truth for all cross-component types: roles, security levels,
+  VM instruction set, message envelopes, device kinds. Emits AffineScript
+  modules, an Elixir module attribute, and `.twasm` region schemas.
+
+| `idaptik-vm`
+| AffineScript
+| Pure reversible VM. Replaces `vm/` from the current repo. Reversibility is a
+  type-checked invariant via affine/QTT, not a docstring claim.
+
+| `idaptik-shared`
+| AffineScript
+| Thin façade over idaptik-contracts plus pure utilities. Replaces `shared/`.
+  The current monorepo's `shared/src/*.res` deletion is treated as forced
+  clarity rather than restored from history.
+
+| `idaptik-game`
+| AffineScript
+| The IDApixiTIK game. Replaces `src/` from the current repo. One AffineScript
+  module per directory in the current `src/app/` tree; megafile splits
+  (LaptopGUI 2081 LOC, GuardNPC 1820 LOC, NetworkDesktop 1767 LOC) are
+  structurally prevented from re-emerging.
+
+| `idaptik-sync`
+| Elixir/Phoenix
+| Multiplayer sync server. Stays Elixir; consumes the generated role enum
+  from idaptik-contracts. Replaces `sync-server/`. Independent of the porting
+  waves but renamed for consistency.
+
+| `idaptik-ums`
+| AffineScript shell + Idris2 ABI + Zig FFI
+| Unified Modding Studio. The shell ports to AffineScript; the
+  Idris2/Zig ABI/FFI layers stay as-is. ProvenBridge.idr fate is decided in
+  this repo's first wave.
+
+| `idaptik-escape-hatch`
+| Rust + SPARK contract specs (boundary kernels)
+| Developer TUI. Stays Rust (ratatui). Adds SPARK contract specs for the
+  parser/state-machine kernels per the typed-wasm SPARK-experiment philosophy
+  (boundary kernels only, not whole-Rust replacement).
+
+| `idaptik-developers`
+| AsciiDoc / static site
+| Developer portal, ADRs, white papers. Already a separable concern in the
+  current monorepo's `idaptik-developers/` subdirectory.
+
+| `idaptik-dlc-iky` / `idaptik-dlc-reversibley`
+| AffineScript
+| DLC packs. Imports `idaptik-vm` directly rather than re-implementing VM bits.
+  Replaces `dlc/idaptiky/` and `dlc/idaptik-reversibley/`.
+|===
+
+=== Cross-repo contract layer
+
+Every inter-component boundary goes through `idaptik-contracts`. No component
+hand-writes another's types. The contracts repo's CI emits the generated
+artifacts and publishes them as release assets; consumers depend on a pinned
+contracts version, not the head of any other component.
+
+This is the structural answer to audit theme #2 ("boundary contracts rot when
+hand-maintained; generated contracts hold"). Generation becomes the only
+allowed cross-component coupling.
+
+=== Monorepo wrapper responsibilities
+
+`idaptik` (the wrapper) is reduced to:
+
+* `.gitmodules` pointing at each component's pinned commit.
+* `TOPOLOGY.adoc` — what each component is, where to find it, who owns it.
+* `ROADMAP.adoc` — multi-component sequencing only.
+* `Justfile` — convenience aliases that delegate to component-local tooling.
+
+Everything else (CLAUDE.md, CHANGELOG, CODEOWNERS, dependabot.yml, CI
+workflows) moves into the components. The wrapper's CODEOWNERS owns only
+`.gitmodules` and the wrapper's own docs.
+
+== Consequences
+
+=== Positive
+
+. *Build-config orphaning becomes impossible.* Each component repo has exactly
+  one build configuration, owned by its CI. An orphaned repo is visibly an
+  orphaned repo, not a silently stale subdirectory.
+
+. *Doc-reality drift becomes localised.* CLAUDE.md totals belong to one
+  component each; the audit's "542 .res files" claim was wrong because it was
+  trying to summarise six components at once. Per-component CLAUDE.md is small
+  enough to stay accurate.
+
+. *Boundary contracts cannot rot.* The role taxonomy lives in one place,
+  consumed by codegen in three target languages. The audit's three-way desync
+  (lobby/game/client) is structurally eliminated.
+
+. *Independent release cadences.* idaptik-vm can hit 1.0 (reversibility proved)
+  while idaptik-game is still alpha. The current monorepo couples versioning.
+
+. *Aligned with existing convention.* hyperpolymath already uses this pattern
+  (`repos-monorepo`). No new tooling required.
+
+. *Matches port boundaries.* The waves in the porting plan are exactly per-repo
+  units. No wave straddles a repository boundary.
+
+=== Negative
+
+. *Nine new repositories.* Onboarding cost: a new contributor has to clone
+  more things. Mitigated by the wrapper's `git submodule update --init
+  --recursive`.
+
+. *Cross-component refactors require coordinated PRs.* A change that touches
+  the contracts and the game is two PRs. Mitigated by codegen: most cross-
+  component changes are now contract-only.
+
+. *CI fanout.* Each repo gets its own actions runs. Mitigated by the fact that
+  each repo's CI is much simpler than the current monorepo's.
+
+. *History split.* The new repos start with `git init`. Provenance via
+  `git log --follow` is lost across the boundary. Mitigated by capturing the
+  current monorepo's HEAD commit SHA in each new repo's first commit message.
+
+=== Neutral
+
+. *Wrapper repo retains the `idaptik` name.* External links (badges, papers,
+  Zenodo DOIs) continue resolving.
+
+== Alternatives considered
+
+=== Single repo, workspace-per-language
+
+Rejected. Cargo workspace + dune workspace + mix umbrella in one repo is
+technically feasible, but it does not solve audit themes #1, #2, or #3 — it
+just changes which directory the rotting config lives in. A monorepo at this
+size has already demonstrated the failure modes; choosing it again under a
+different layout would be choosing the same outcome.
+
+=== Status quo (no topology change), port in place
+
+Rejected. The port is a once-in-years opportunity to fix the topology with the
+work already moving. Doing the port in place means doing it twice — once to
+AffineScript, then again later to fix the structural issues. The audit's
+single-highest-leverage move (vm/rescript.json) is itself a workaround for the
+monorepo's build-config orphaning; the polyrepo makes that workaround
+unnecessary.
+
+=== Multi-monorepo (group by language)
+
+E.g. `idaptik-affinescript` (game + vm + shared + ums shell + dlc),
+`idaptik-systems` (escape-hatch + sync). Rejected. Couples release cadences
+across components that genuinely have nothing to do with each other (game
+release ≠ VM release ≠ DLC release). Re-introduces audit theme #3 inside each
+language-grouped repo.
+
+== Sunset plan for current `hyperpolymath/idaptik`
+
+. While porting waves run, current monorepo is `archive-only` — no new feature
+  work. The staging repo `idaptik-rescript13-staging` is similarly frozen.
+. As each component's port lands in its new repo and the wrapper's submodule
+  pointer moves there, the corresponding subdirectory in the current monorepo
+  is deleted (moved to `_archive/` for one release cycle, then removed).
+. When all components have moved, the current monorepo's `main` branch is
+  rewritten to the wrapper-only shape. A `legacy-monolith` tag preserves the
+  pre-rewrite HEAD for reference.
+. Zenodo DOI continuity: the wrapper repo retains the existing DOI; component
+  repos get new DOIs at their first releases.
+
+== Implementation order
+
+. This ADR merged into `idaptik-developers/`.
+. `idaptik-contracts` repo created (Plan §1).
+. `idaptik-vm` repo created (Plan Wave 1) — first port, surfaces compiler gaps.
+. Other waves proceed in the order documented in the porting plan.
+. Wrapper repo's `.gitmodules` populated incrementally as each component lands.
+
+== References
+
+* `idaptik` 2026-04-30 stabilisation synthesis (the audit driving this ADR).
+* `hyperpolymath/repos-monorepo` — existing eclipse-drive convention.
+* `hyperpolymath/typed-wasm` README §Two Roles (ADR-004) — aggregate library
+  pattern that idaptik-contracts follows.
+* `hyperpolymath/affinescript` README — language semantics targeted by the port.
+* `hyperpolymath/typed-wasm/SPARK-experiment/README.adoc` — boundary-kernels-only
+  philosophy applied to idaptik-escape-hatch.
