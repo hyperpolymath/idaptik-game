@@ -16,7 +16,7 @@ content before merge.
 
 | File | Purpose | Required content sketch |
 |------|---------|--------------------------|
-| `LICENSE` | License text | PMPL-1.0-or-later body |
+| `LICENSE` | License text | MPL-2.0 body |
 | `SECURITY.md` | Security disclosure policy | Reporting address, response time |
 | `CODE_OF_CONDUCT.md` | Behavioural norms | Contributor Covenant adapted |
 | `CONTRIBUTING.md` | How to contribute | DCO, branch rules, review path |

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: PMPL-1.0-or-later
+# SPDX-License-Identifier: MPL-2.0
 # stapeln.toml — layered Chainguard container build for idaptik-game.
 
 [metadata]
@@ -6,7 +6,7 @@ name = "idaptik-game"
 version = "0.1.0-alpha"
 description = "IDApixiTIK game (typed-wasm target, served by nginx)."
 author = "Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>"
-license = "PMPL-1.0-or-later"
+license = "MPL-2.0"
 registry = "ghcr.io/hyperpolymath"
 
 [build]
